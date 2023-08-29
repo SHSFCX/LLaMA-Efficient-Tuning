@@ -24,6 +24,8 @@ from llmtuner.extras.save_and_load import load_valuehead_params
 from llmtuner.hparams import FinetuningArguments
 from llmtuner.tuner.core.adapter import init_adapter
 
+from independent_kv.modeling_llama_unsupervised import LlamaIndependentKVUnsuperForCausalLM
+
 if TYPE_CHECKING:
     from transformers import PreTrainedTokenizer
     from llmtuner.hparams import ModelArguments
@@ -43,7 +45,7 @@ def load_model_and_tokenizer(
     model_args: "ModelArguments",
     finetuning_args: "FinetuningArguments",
     is_trainable: Optional[bool] = False,
-    stage: Optional[Literal["pt", "sft", "rm", "ppo"]] = "sft"
+    stage: Optional[Literal["pt", "sft", "rm", "ppo", "independent_kv_unsupervised"]] = "sft"
 ) -> Tuple[PreTrainedModel, "PreTrainedTokenizer"]:
     r"""
     Loads pretrained model and tokenizer.
@@ -144,13 +146,22 @@ def load_model_and_tokenizer(
         logger.info("Quantizing model to {} bit.".format(model_args.quantization_bit))
 
     # Load and prepare pre-trained models (without valuehead).
-    model = AutoModelForCausalLM.from_pretrained(
-        model_to_load,
-        config=config,
-        torch_dtype=model_args.compute_dtype,
-        low_cpu_mem_usage=(not is_deepspeed_zero3_enabled()),
-        **config_kwargs
-    )
+    if finetuning_args.independent_kv_type == "unsupervised":
+        model = LlamaIndependentKVUnsuperForCausalLM.from_pretrained(
+            model_to_load,
+            config=config,
+            torch_dtype=model_args.compute_dtype,
+            low_cpu_mem_usage=(not is_deepspeed_zero3_enabled()),
+            **config_kwargs
+        )
+    else:
+        model = AutoModelForCausalLM.from_pretrained(
+            model_to_load,
+            config=config,
+            torch_dtype=model_args.compute_dtype,
+            low_cpu_mem_usage=(not is_deepspeed_zero3_enabled()),
+            **config_kwargs
+        )
 
     # Disable custom generate method (for Qwen)
     if "GenerationMixin" not in str(model.generate.__func__):

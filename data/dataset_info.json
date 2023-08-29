@@ -256,5 +256,25 @@
       "history": ""
     },
     "stage": "pt"
+  },
+  "wiki_demo_2": {
+    "file_name": "wiki_demo_2.txt",
+    "columns": {
+      "prompt": "text",
+      "query": "",
+      "response": "",
+      "history": ""
+    },
+    "stage": "pt"
+  },
+  "wiki_self": {
+    "file_name": "/data/RedPajama/unsupervised/wiki-unsupervised.txt",
+    "columns": {
+      "prompt": "text",
+      "query": "",
+      "response": "",
+      "history": ""
+    },
+    "stage": "pt"
   }
 }

@@ -1,0 +1,22 @@
+deepspeed --num_gpus=8  src/train_bash.py \
+    --stage pt \
+    --independent_kv_type unsupervised \
+    --model_name_or_path /data/models/Llama-2-7b-hf \
+    --do_train \
+    --dataset wiki_self \
+    --template default \
+    --finetuning_type full \
+    --output_dir /data/models/Llama-2-7b-hf-test \
+    --overwrite_cache \
+    --per_device_train_batch_size 4 \
+    --gradient_accumulation_steps 4 \
+    --preprocessing_num_workers 16 \
+    --max_source_length 4096 \
+    --lr_scheduler_type cosine \
+    --logging_steps 10 \
+    --save_steps 1000 \
+    --learning_rate 5e-5 \
+    --num_train_epochs 3.0 \
+    --plot_loss \
+    --bf16 \
+    --deepspeed config/deepspeed.json

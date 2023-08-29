@@ -12,6 +12,10 @@ class FinetuningArguments:
         default="lora",
         metadata={"help": "Which fine-tuning method to use."}
     )
+    independent_kv_type: Optional[Literal["unsupervised", "supervised"]] = field(
+        default=None,
+        metadata={"help": "Which fine-tuning method to use."}
+    )
     num_hidden_layers: Optional[int] = field(
         default=32,
         metadata={"help": "Number of decoder blocks in the model for partial-parameter (freeze) fine-tuning. \
