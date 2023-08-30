@@ -268,7 +268,7 @@
     "stage": "pt"
   },
   "wiki_self": {
-    "file_name": "/data/RedPajama/unsupervised/wiki-unsupervised.txt",
+    "file_name": "/data/wiki-en-long.jsonl",
     "columns": {
       "prompt": "text",
       "query": "",

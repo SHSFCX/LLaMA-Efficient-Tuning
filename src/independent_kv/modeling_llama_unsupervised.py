@@ -325,18 +325,18 @@ class LlamaAttention(nn.Module):
             cos, sin = self.rotary_emb(value_states, seq_len=kv_seq_len)
             query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin, position_ids)
         else:
-            print(f"key_states.shape: {key_states.shape}")
-            print(f"value_states.shape: {value_states.shape}")
-            print(f"q_len: {q_len}")
+            #print(f"key_states.shape: {key_states.shape}")
+            #print(f"value_states.shape: {value_states.shape}")
+            #print(f"q_len: {q_len}")
             k2, k1 = torch.split(key_states, q_len, dim=2)
             v2, v1 = torch.split(value_states, q_len, dim=2)
             cos, sin = self.rotary_emb(v2, seq_len=q_len // 2)
             query_states, k2 = apply_rotary_pos_emb(query_states, k2, cos, sin, position_ids)
             key_states = torch.cat([k2, k1], dim=2)
             value_states = torch.cat([v2, v1], dim=2)
-            print(f"query_states.shape: {query_states.shape}")
-            print(f"key_states.shape: {key_states.shape}")
-            print(f"value_states.shape: {value_states.shape}")
+            #print(f"query_states.shape: {query_states.shape}")
+            #print(f"key_states.shape: {key_states.shape}")
+            #print(f"value_states.shape: {value_states.shape}")
 
 
         if past_key_value is not None:
@@ -439,7 +439,7 @@ class LlamaDecoderLayer(nn.Module):
             use_cache=use_cache,
         )
 
-        print(f"hidden_states_1.shape: {hidden_states_1.shape}")
+        #print(f"hidden_states_1.shape: {hidden_states_1.shape}")
 
         hidden_states_2, self_attn_weights, present_key_value, _ = self.self_attn(
             hidden_states=hidden_states_2,
@@ -454,7 +454,7 @@ class LlamaDecoderLayer(nn.Module):
         hidden_states_2 = hidden_states_2.reshape(
             k1.shape[0], k1.shape[1], -1
         )
-        print(f"hidden_states_2.shape: {hidden_states_2.shape}")
+        #print(f"hidden_states_2.shape: {hidden_states_2.shape}")
 
         hidden_states = torch.cat([hidden_states_1, hidden_states_2], dim=1)
 
@@ -633,7 +633,7 @@ class LlamaModel(LlamaPreTrainedModel):
                 device=inputs_embeds.device,
                 past_key_values_length=past_key_values_length,
             )
-            print(f"combined_attention_mask.shape: {combined_attention_mask.shape}")
+            #print(f"combined_attention_mask.shape: {combined_attention_mask.shape}")
 
         if attention_mask is not None:
             # [bsz, seq_len] -> [bsz, 1, tgt_seq_len, src_seq_len]
@@ -673,7 +673,7 @@ class LlamaModel(LlamaPreTrainedModel):
 
         r_attention_mask = r_attention_mask[None, None, :, :].expand(input_shape[0] // r, 1, -1, -1).clone()
 
-        print(f"r_attention_mask.shape: {r_attention_mask.shape}")
+        #print(f"r_attention_mask.shape: {r_attention_mask.shape}")
 
         if attention_mask is not None:
             # [bsz, seq_len] -> [bsz, 1, tgt_seq_len, src_seq_len]
@@ -681,7 +681,7 @@ class LlamaModel(LlamaPreTrainedModel):
                 inputs_embeds.device
             )
             expanded_attn_mask = torch.cat((expanded_attn_mask, expanded_attn_mask), dim=-1)
-            print(f"expanded_attn_mask.shape: {expanded_attn_mask.shape}")
+            #print(f"expanded_attn_mask.shape: {expanded_attn_mask.shape}")
             r_attention_mask += expanded_attn_mask
 
         return r_attention_mask
@@ -742,7 +742,7 @@ class LlamaModel(LlamaPreTrainedModel):
         inputs_embeds_ref = inputs_embeds.clone()
 
         # embed positions
-        print(f"attention_mask.shape{attention_mask.shape}")
+        #print(f"attention_mask.shape{attention_mask.shape}")
 
         
 
@@ -819,11 +819,11 @@ class LlamaModel(LlamaPreTrainedModel):
 
         hidden_states = [self.norm(h) for h in hidden_states]
 
-        print(f"hidden_states[1].shape: {hidden_states[1].shape}")
+        #print(f"hidden_states[1].shape: {hidden_states[1].shape}")
         hidden_states[1] = hidden_states[1].reshape(
             -1, self.max_position_embeddings, self.hidden_size
         )
-        print(f"after hidden_states[1].shape: {hidden_states[1].shape}")
+        #print(f"after hidden_states[1].shape: {hidden_states[1].shape}")
 
 
         # add hidden states from the last decoder layer
