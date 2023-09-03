@@ -276,5 +276,25 @@
       "history": ""
     },
     "stage": "pt"
+  },
+  "wiki_qa_naive": {
+    "file_name": "/data/wikihop_sample.json",
+    "columns": {
+      "prompt": "instruction",
+      "query": "question",
+      "response": "answer",
+      "history": ""
+    },
+    "stage": "sft"
+  },
+  "wikihop_gpt_correct": {
+    "file_name": "/data/Wiki-Hop/wikihop_gpt_correct.json",
+    "columns": {
+      "prompt": "instruction",
+      "query": "question",
+      "response": "answer",
+      "history": ""
+    },
+    "stage": "sft"
   }
 }

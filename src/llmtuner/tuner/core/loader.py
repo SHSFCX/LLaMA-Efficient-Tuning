@@ -25,6 +25,7 @@ from llmtuner.hparams import FinetuningArguments
 from llmtuner.tuner.core.adapter import init_adapter
 
 from independent_kv.modeling_llama_unsupervised import LlamaIndependentKVUnsuperForCausalLM
+from independent_kv.modeling_llama_supervised import LlamaIndependentKVSuperForCausalLM
 
 if TYPE_CHECKING:
     from transformers import PreTrainedTokenizer
@@ -148,6 +149,14 @@ def load_model_and_tokenizer(
     # Load and prepare pre-trained models (without valuehead).
     if finetuning_args.independent_kv_type == "unsupervised":
         model = LlamaIndependentKVUnsuperForCausalLM.from_pretrained(
+            model_to_load,
+            config=config,
+            torch_dtype=model_args.compute_dtype,
+            low_cpu_mem_usage=(not is_deepspeed_zero3_enabled()),
+            **config_kwargs
+        )
+    elif finetuning_args.independent_kv_type == "supervised":
+        model = LlamaIndependentKVSuperForCausalLM.from_pretrained(
             model_to_load,
             config=config,
             torch_dtype=model_args.compute_dtype,

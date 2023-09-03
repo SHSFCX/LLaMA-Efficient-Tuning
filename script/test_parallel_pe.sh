@@ -1,20 +1,20 @@
-deepspeed --num_gpus=8  src/train_bash.py \
+deepspeed --hostfile=hostfile  src/train_bash.py \
     --stage pt \
     --independent_kv_type unsupervised \
-    --model_name_or_path /data/models/Llama-2-7b-hf \
+    --model_name_or_path /data/models/Llama-2-13b-hf \
     --do_train \
-    --dataset wiki_demo_2 \
+    --dataset wiki_self \
     --template default \
     --finetuning_type full \
-    --output_dir /data/models/Llama-2-7b-wiki-test \
+    --output_dir /data/models/Llama-2-13b-wiki-un-steps-bsz512 \
     --overwrite_cache \
     --per_device_train_batch_size 1 \
-    --gradient_accumulation_steps 2 \
-    --preprocessing_num_workers 10 \
+    --gradient_accumulation_steps 16 \
+    --preprocessing_num_workers 60 \
     --max_source_length 4096 \
     --lr_scheduler_type cosine \
     --logging_steps 10 \
-    --save_steps 10000 \
+    --save_steps 50 \
     --learning_rate 5e-5 \
     --num_train_epochs 1.0 \
     --plot_loss \

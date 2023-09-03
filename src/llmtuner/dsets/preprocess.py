@@ -9,7 +9,7 @@ if TYPE_CHECKING:
     from datasets import Dataset, IterableDataset
     from transformers import Seq2SeqTrainingArguments
     from transformers.tokenization_utils import PreTrainedTokenizer
-    from llmtuner.hparams import DataArguments
+    from llmtuner.hparams import DataArguments, FinetuningArguments
 
 
 def preprocess_dataset(
@@ -17,6 +17,7 @@ def preprocess_dataset(
     tokenizer: "PreTrainedTokenizer",
     data_args: "DataArguments",
     training_args: "Seq2SeqTrainingArguments",
+    finetuning_args: "FinetuningArguments",
     stage: Literal["pt", "sft", "rm", "ppo"]
 ) -> Union["Dataset", "IterableDataset"]:
     column_names = list(next(iter(dataset)).keys())
@@ -29,6 +30,14 @@ def preprocess_dataset(
             history = examples["history"][i] if "history" in examples else None
             system = examples["system"][i] if "system" in examples else None
             yield query, response, history, system
+    
+    def construct_example_with_ref(examples: Dict[str, List[Any]]) -> Generator[Any, None, None]:
+        for i in range(len(examples["prompt"])):
+            prompt, response = examples["prompt"][i], examples["response"][i]
+            question = examples["query"][i]
+            refs = examples["reference"][i]
+
+            yield prompt, response, question, refs
 
     def preprocess_pretrain_dataset(examples: Dict[str, List[Any]]) -> Dict[str, Any]:
         # build grouped texts with format `X1 X2 X3 ...` (without <eos>)
@@ -74,6 +83,67 @@ def preprocess_dataset(
             model_inputs["input_ids"].append(input_ids)
             model_inputs["attention_mask"].append([1] * len(input_ids))
             model_inputs["labels"].append(labels)
+
+        return model_inputs
+    
+    def preprocess_supervised_reference_dataset(examples: Dict[str, List[Any]]) -> Dict[str, Any]:
+        # build inputs with format `<bos> X Y <eos>` and labels with format `<ignore> ... <ignore> Y <eos>`
+        # for multiturn examples, we only mask the prompt part in each prompt-response pair.
+        model_inputs = {"input_ids": [], "attention_mask": [], "labels": []}
+        max_length = data_args.max_source_length + data_args.max_target_length
+
+
+        for prompt, response, question, refs in construct_example_with_ref(examples):
+            # print("special_tokens_map")
+            # print(tokenizer.special_tokens_map)
+            # print(tokenizer.sep_token_id)
+            # print(tokenizer.bos_token_id)
+            # print(tokenizer.eos_token_id)
+            # print(tokenizer.unk_token_id)
+            prompt_ids = [tokenizer.bos_token_id] + tokenizer.encode(prompt, add_special_tokens=False)
+            # print(f"prompt_id length: {len(prompt_ids)}") # 12
+            source_attention_mask = [1] * len(prompt_ids)
+
+            ref_ids = []
+            for ref in refs:
+                ref_id = tokenizer.encode(
+                    ref,
+                    add_special_tokens=False,
+                )
+                if len(ref_id) >= 128:
+                    ref_id = ref_id[:128]
+                    source_attention_mask += [1] * 128
+                elif len(ref_id) < 128:                    
+                    source_attention_mask += [1] * len(ref_id)
+                    source_attention_mask += [0] * (128 - len(ref_id))
+                    ref_id += [tokenizer.unk_token_id for _ in range(128 - len(ref_id))]
+
+                ref_ids += ref_id
+            
+            question_ids = tokenizer.encode(
+                question,
+                add_special_tokens=False,
+            )
+            source_ids = prompt_ids + ref_ids + question_ids
+            source_attention_mask += [1] * len(question_ids)
+
+            answer_ids = tokenizer.encode(
+                response,
+                add_special_tokens=False,
+            )
+            answer_ids += [tokenizer.eos_token_id]
+            target_ids = answer_ids
+            target_attention_mask = [1] * len(target_ids)
+
+            if len(source_ids) > data_args.max_source_length:
+                source_ids = source_ids[:data_args.max_source_length]
+                source_attention_mask = source_attention_mask[:data_args.max_source_length]
+            
+            input_ids = source_ids + target_ids
+
+            model_inputs["input_ids"].append(input_ids)
+            model_inputs["attention_mask"].append(source_attention_mask + target_attention_mask)
+            model_inputs["labels"].append([IGNORE_INDEX] * len(source_ids) + target_ids)
 
         return model_inputs
 
@@ -139,9 +209,14 @@ def preprocess_dataset(
         preprocess_function = preprocess_pretrain_dataset
         print_function = print_unsupervised_dataset_example
     elif stage == "sft" and not training_args.predict_with_generate:
-        dataset = dataset.filter(lambda example: example["prompt"] and example["response"])
-        preprocess_function = preprocess_supervised_dataset
-        print_function = print_supervised_dataset_example
+        if finetuning_args.independent_kv_type == "supervised":
+            dataset = dataset.filter(lambda example: example["prompt"] and example["response"])
+            preprocess_function = preprocess_supervised_reference_dataset
+            print_function = print_supervised_dataset_example
+        else:
+            dataset = dataset.filter(lambda example: example["prompt"] and example["response"])
+            preprocess_function = preprocess_supervised_dataset
+            print_function = print_supervised_dataset_example
     elif stage == "rm":
         dataset = dataset.filter(lambda example: example["prompt"] and len(example["response"]) > 1)
         preprocess_function = preprocess_pairwise_dataset

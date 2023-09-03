@@ -112,8 +112,8 @@ class LlamaRotaryEmbedding(torch.nn.Module):
         freqs = torch.einsum("i,j->ij", t, self.inv_freq)
         # Different from paper, but it uses a different permutation in order to obtain the same calculation
         emb = torch.cat((freqs, freqs), dim=-1)
-        self.register_buffer("cos_cached", emb.cos().to(dtype), persistent=False)
-        self.register_buffer("sin_cached", emb.sin().to(dtype), persistent=False)
+        self.register_buffer("cos_cached", emb.cos()[None, None, :, :].to(dtype), persistent=False)
+        self.register_buffer("sin_cached", emb.sin()[None, None, :, :].to(dtype), persistent=False)
 
     def forward(self, x, seq_len=None):
         # x: [bs, num_attention_heads, seq_len, head_size]
@@ -121,8 +121,8 @@ class LlamaRotaryEmbedding(torch.nn.Module):
             self._set_cos_sin_cache(seq_len=seq_len, device=x.device, dtype=x.dtype)
 
         return (
-            self.cos_cached[:seq_len, ...].to(dtype=x.dtype),
-            self.sin_cached[:seq_len, ...].to(dtype=x.dtype),
+            self.cos_cached[:, :, :seq_len, ...].to(dtype=x.dtype),
+            self.sin_cached[:, :, :seq_len, ...].to(dtype=x.dtype),
         )
 
 
@@ -141,8 +141,8 @@ class LlamaLinearScalingRotaryEmbedding(LlamaRotaryEmbedding):
         freqs = torch.einsum("i,j->ij", t, self.inv_freq)
         # Different from paper, but it uses a different permutation in order to obtain the same calculation
         emb = torch.cat((freqs, freqs), dim=-1)
-        self.register_buffer("cos_cached", emb.cos().to(dtype), persistent=False)
-        self.register_buffer("sin_cached", emb.sin().to(dtype), persistent=False)
+        self.register_buffer("cos_cached", emb.cos()[None, None, :, :].to(dtype), persistent=False)
+        self.register_buffer("sin_cached", emb.sin()[None, None, :, :].to(dtype), persistent=False)
 
 
 class LlamaDynamicNTKScalingRotaryEmbedding(LlamaRotaryEmbedding):
@@ -167,26 +167,29 @@ class LlamaDynamicNTKScalingRotaryEmbedding(LlamaRotaryEmbedding):
         freqs = torch.einsum("i,j->ij", t, self.inv_freq)
         # Different from paper, but it uses a different permutation in order to obtain the same calculation
         emb = torch.cat((freqs, freqs), dim=-1)
-        self.register_buffer("cos_cached", emb.cos().to(dtype), persistent=False)
-        self.register_buffer("sin_cached", emb.sin().to(dtype), persistent=False)
+        self.register_buffer("cos_cached", emb.cos()[None, None, :, :].to(dtype), persistent=False)
+        self.register_buffer("sin_cached", emb.sin()[None, None, :, :].to(dtype), persistent=False)
 
 
 def rotate_half(x):
     """Rotates half the hidden dims of the input."""
+    print(f"x.shape: {x.shape}")
     x1 = x[..., : x.shape[-1] // 2]
+    print(f"x1.shape: {x1.shape}")
     x2 = x[..., x.shape[-1] // 2:]
+    print(f"x2.shape: {x2.shape}")
     return torch.cat((-x2, x1), dim=-1)
 
 
-def apply_rotary_pos_emb(x_or_x_list, cos, sin, position_ids):
+def apply_rotary_pos_emb(q, k, cos, sin, position_ids):
+    # The first two dimensions of cos and sin are always 1, so we can `squeeze` them.
+    cos = cos.squeeze(1).squeeze(0)  # [seq_len, dim]
+    sin = sin.squeeze(1).squeeze(0)  # [seq_len, dim]
     cos = cos[position_ids].unsqueeze(1)  # [bs, 1, seq_len, dim]
     sin = sin[position_ids].unsqueeze(1)  # [bs, 1, seq_len, dim]
-    if isinstance(x_or_x_list, list):
-        x_embed_list = [(x * cos) + (rotate_half(x) * sin) for x in x_or_x_list]
-        return x_embed_list
-    else:
-        x_embed = (x_or_x_list * cos) + (rotate_half(x_or_x_list) * sin)
-        return x_embed
+    q_embed = (q * cos) + (rotate_half(q) * sin)
+    k_embed = (k * cos) + (rotate_half(k) * sin)
+    return q_embed, k_embed
 
 
 class LlamaMLP(nn.Module):
@@ -285,66 +288,71 @@ class LlamaAttention(nn.Module):
             reference_kv: Optional[Tuple[torch.Tensor]] = None,
             output_attentions: bool = False,
             use_cache: bool = False,
-    ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]], Optional[Tuple[torch.Tensor]]]:
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
 
-        BN, L_seg, d = hidden_states.size()
-        H, Hkv, dH = self.num_heads, self.num_key_value_heads, self.head_dim
+        bsz, q_len, _ = hidden_states.size()
 
-        q = self.q_proj(hidden_states)
-        k = self.k_proj(hidden_states)
-        v = self.v_proj(hidden_states)
+        query_states = self.q_proj(hidden_states)
+        key_states = self.k_proj(hidden_states)
+        value_states = self.v_proj(hidden_states)
 
         if reference_kv is None:
-            output_kv_states = (k, v)
-            B = BN
-            L_q = L_seg
-
-            q = q.view(BN, L_seg, H, dH).transpose(1, 2)
-            k = k.view(BN, L_seg, Hkv, dH).transpose(1, 2)
-            v = v.view(BN, L_seg, Hkv, dH).transpose(1, 2)
-
-            cos, sin = self.rotary_emb(k, seq_len=L_seg)
-            q, k = apply_rotary_pos_emb([q, k], cos, sin, position_ids)
-
+            output_kv_states = (key_states, value_states)
+            kv_len = q_len
         else:
             output_kv_states = None
-            L_q = L_full = self.max_position_embeddings
-            N_seg = L_full // L_seg
-            B = BN // N_seg
             ref_k, ref_v = reference_kv
+            r = self.max_position_embeddings // ref_k.shape[1]
+            bsz = ref_k.shape[0] // r
+            q_len = self.max_position_embeddings
+            ref_k = ref_k.view(bsz, q_len, -1)
+            ref_v = ref_v.view(bsz, q_len, -1)
+            query_states = query_states.view(bsz, q_len, -1)
+            key_states = key_states.view(bsz, q_len, -1)
+            value_states = value_states.view(bsz, q_len, -1)
+            key_states = torch.cat([key_states, ref_k], dim=1)
+            value_states = torch.cat([value_states, ref_v], dim=1)
+            position_ids = position_ids.expand(r, -1).reshape(-1, q_len)
+            kv_len = 2 * q_len
 
-            q = q.view(BN, L_seg, H, dH).transpose(1, 2)
-            k = k.view(BN, L_seg, Hkv, dH).transpose(1, 2)
-            ref_k = ref_k.reshape(BN, L_seg, Hkv, dH).transpose(1, 2)
+        query_states = query_states.view(bsz, q_len, self.num_heads, self.head_dim).transpose(1, 2)
+        key_states = key_states.view(bsz, kv_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
+        value_states = value_states.view(bsz, kv_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
 
-            cos, sin = self.rotary_emb(k, seq_len=2 * L_seg)
-            q, k = apply_rotary_pos_emb([q, k], cos, sin, L_seg + position_ids)
-            ref_k = apply_rotary_pos_emb(ref_k, cos, sin, position_ids)
+        kv_seq_len = key_states.shape[-2]
+        if past_key_value is not None:
+            kv_seq_len += past_key_value[0].shape[-2]
 
-            q = q.transpose(1, 2).reshape(B, L_full, H, dH).transpose(1, 2)
-            k = k.transpose(1, 2).reshape(B, L_full, Hkv, dH).transpose(1, 2)
-            ref_k = ref_k.transpose(1, 2).reshape(B, L_full, Hkv, dH).transpose(1, 2)
+        if reference_kv is None:
+            cos, sin = self.rotary_emb(value_states, seq_len=kv_seq_len)
+            query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin, position_ids)
+        else:
+            # print(f"key_states.shape: {key_states.shape}")
+            # print(f"value_states.shape: {value_states.shape}")
+            # print(f"q_len: {q_len}")
+            k2, k1 = torch.split(key_states, q_len, dim=2)
+            v2, v1 = torch.split(value_states, q_len, dim=2)
+            cos, sin = self.rotary_emb(v2, seq_len=q_len // 2)
+            query_states, k2 = apply_rotary_pos_emb(query_states, k2, cos, sin, position_ids)
+            key_states = torch.cat([k2, k1], dim=2)
+            value_states = torch.cat([v2, v1], dim=2)
+            # print(f"query_states.shape: {query_states.shape}")
+            # print(f"key_states.shape: {key_states.shape}")
+            # print(f"value_states.shape: {value_states.shape}")
 
-            v = v.view(B, L_full, Hkv, dH).transpose(1, 2)
-            ref_v = ref_v.reshape(B, L_full, Hkv, dH).transpose(1, 2)
+        if past_key_value is not None:
+            # reuse k, v, self_attention
+            key_states = torch.cat([past_key_value[0], key_states], dim=2)
+            value_states = torch.cat([past_key_value[1], value_states], dim=2)
 
-            k = torch.cat([k, ref_k], dim=2)
-            v = torch.cat([v, ref_v], dim=2)
-            L_kv = 2 * L_full
-
-            if past_key_value is not None:
-                L_kv += past_key_value[0].shape[-2]
-                k = torch.cat([past_key_value[0], k], dim=2)
-                v = torch.cat([past_key_value[1], v], dim=2)
-
-        past_key_value = (k, v) if use_cache else None
+        past_key_value = (key_states, value_states) if use_cache else None
 
         # repeat k/v heads if n_kv_heads < n_heads
-        k = repeat_kv(k, self.num_key_value_groups)
-        v = repeat_kv(v, self.num_key_value_groups)
+        key_states = repeat_kv(key_states, self.num_key_value_groups)
+        value_states = repeat_kv(value_states, self.num_key_value_groups)
 
         attn_weights = None
-        # attn_weights = torch.matmul(q, k.transpose(2, 3)) / math.sqrt(self.head_dim)
+        # attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) / math.sqrt(self.head_dim)
 
         # if attn_weights.size() != (bsz, self.num_heads, q_len, kv_seq_len):
         #     raise ValueError(
@@ -360,21 +368,23 @@ class LlamaAttention(nn.Module):
         #     attn_weights = attn_weights + attention_mask
 
         # upcast attention to fp32
-        # attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(q.dtype)
-        # attn_output = torch.matmul(attn_weights, v)
-        attn_output = F.scaled_dot_product_attention(q, k, v, attn_mask=attention_mask, dropout_p=0.0)
+        # attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query_states.dtype)
+        # attn_output = torch.matmul(attn_weights, value_states)
+        attn_output = F.scaled_dot_product_attention(query_states, key_states, value_states, attn_mask=attention_mask,
+                                                     dropout_p=0.0)
 
-        if attn_output.size() != (B, H, L_q, dH):
+        if attn_output.size() != (bsz, self.num_heads, q_len, self.head_dim):
             raise ValueError(
-                f"`attn_output` should be of size {(B, H, L_q, dH)}, but is {attn_output.size()}"
+                f"`attn_output` should be of size {(bsz, self.num_heads, q_len, self.head_dim)}, but is"
+                f" {attn_output.size()}"
             )
 
         attn_output = attn_output.transpose(1, 2).contiguous()
-        attn_output = attn_output.reshape(B, L_q, d)
+        attn_output = attn_output.reshape(bsz, q_len, self.hidden_size)
 
         if self.pretraining_tp > 1:
-            attn_output = attn_output.split(d // self.pretraining_tp, dim=2)
-            o_proj_slices = self.o_proj.weight.split(d // self.pretraining_tp, dim=1)
+            attn_output = attn_output.split(self.hidden_size // self.pretraining_tp, dim=2)
+            o_proj_slices = self.o_proj.weight.split(self.hidden_size // self.pretraining_tp, dim=1)
             attn_output = sum([F.linear(attn_output[i], o_proj_slices[i]) for i in range(self.pretraining_tp)])
         else:
             attn_output = self.o_proj(attn_output)
@@ -396,7 +406,7 @@ class LlamaDecoderLayer(nn.Module):
 
     def forward(
             self,
-            hidden_states: Tuple[torch.Tensor],
+            hidden_states: torch.Tensor,
             attention_mask: Optional[torch.Tensor] = None,
             r_attention_mask: Optional[torch.Tensor] = None,
             position_ids: Optional[torch.LongTensor] = None,
@@ -445,7 +455,10 @@ class LlamaDecoderLayer(nn.Module):
             use_cache=use_cache,
         )
 
-        hidden_states_2 = hidden_states_2.reshape(hidden_states_1.size())
+        hidden_states_2 = hidden_states_2.reshape(
+            k1.shape[0], k1.shape[1], -1
+        )
+        # print(f"hidden_states_2.shape: {hidden_states_2.shape}")
 
         hidden_states = torch.cat([hidden_states_1, hidden_states_2], dim=1)
 
@@ -790,7 +803,7 @@ class LlamaModel(LlamaPreTrainedModel):
             else:
                 layer_outputs = decoder_layer(
                     hidden_states,
-                    attention_mask=s_attention_mask,
+                    s_attention_mask=attention_mask,
                     r_attention_mask=r_attention_mask,
                     position_ids=position_ids,
                     past_key_value=past_key_value,

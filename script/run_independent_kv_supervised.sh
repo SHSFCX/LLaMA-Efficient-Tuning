@@ -1,12 +1,15 @@
+# CUDA_LAUNCH_BLOCKING=1
+# export CUDA_VISIBLE_DEVICES=""
+# python  src/train_bash.py \
 deepspeed --num_gpus=8  src/train_bash.py \
-    --stage pt \
-    --independent_kv_type unsupervised \
+    --stage sft \
+    --independent_kv_type supervised \
     --model_name_or_path /data/models/Llama-2-7b-hf \
     --do_train \
-    --dataset wiki_demo_2 \
+    --dataset wikihop_gpt_correct \
     --template default \
     --finetuning_type full \
-    --output_dir /data/models/Llama-2-7b-wiki-test \
+    --output_dir /data/models/Llama-2-7b-wikihop_gpt_correct_test \
     --overwrite_cache \
     --per_device_train_batch_size 1 \
     --gradient_accumulation_steps 2 \

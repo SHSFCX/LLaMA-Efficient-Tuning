@@ -1,4 +1,5 @@
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from transformers.trainer_utils import is_main_process
 
 from llmtuner.extras.callbacks import LogCallback
 from llmtuner.extras.logging import get_logger
@@ -12,6 +13,7 @@ from llmtuner.tuner.dpo import run_dpo
 if TYPE_CHECKING:
     from transformers import TrainerCallback
 
+import logging
 
 logger = get_logger(__name__)
 
@@ -20,9 +22,12 @@ def run_exp(args: Optional[Dict[str, Any]] = None, callbacks: Optional[List["Tra
     model_args, data_args, training_args, finetuning_args, generating_args, general_args = get_train_args(args)
     callbacks = [LogCallback()] if callbacks is None else callbacks
 
+    logger.setLevel(logging.INFO if is_main_process(training_args.local_rank) else logging.WARN)
+
     if general_args.stage == "pt":
         run_pt(model_args, data_args, training_args, finetuning_args, callbacks)
     elif general_args.stage == "sft":
+        print("SFT".center(100, "="))
         run_sft(model_args, data_args, training_args, finetuning_args, generating_args, callbacks)
     elif general_args.stage == "rm":
         run_rm(model_args, data_args, training_args, finetuning_args, callbacks)
