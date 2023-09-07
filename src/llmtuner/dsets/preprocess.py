@@ -92,16 +92,11 @@ def preprocess_dataset(
         model_inputs = {"input_ids": [], "attention_mask": [], "labels": []}
         max_length = data_args.max_source_length + data_args.max_target_length
 
+        ref_length = 256
+
 
         for prompt, response, question, refs in construct_example_with_ref(examples):
-            # print("special_tokens_map")
-            # print(tokenizer.special_tokens_map)
-            # print(tokenizer.sep_token_id)
-            # print(tokenizer.bos_token_id)
-            # print(tokenizer.eos_token_id)
-            # print(tokenizer.unk_token_id)
             prompt_ids = [tokenizer.bos_token_id] + tokenizer.encode(prompt, add_special_tokens=False)
-            # print(f"prompt_id length: {len(prompt_ids)}") # 12
             source_attention_mask = [1] * len(prompt_ids)
 
             ref_ids = []
@@ -110,13 +105,13 @@ def preprocess_dataset(
                     ref,
                     add_special_tokens=False,
                 )
-                if len(ref_id) >= 128:
-                    ref_id = ref_id[:128]
-                    source_attention_mask += [1] * 128
-                elif len(ref_id) < 128:                    
+                if len(ref_id) >= ref_length:
+                    ref_id = ref_id[:ref_length]
+                    source_attention_mask += [1] * ref_length
+                elif len(ref_id) < ref_length:                    
                     source_attention_mask += [1] * len(ref_id)
-                    source_attention_mask += [0] * (128 - len(ref_id))
-                    ref_id += [tokenizer.unk_token_id for _ in range(128 - len(ref_id))]
+                    source_attention_mask += [0] * (ref_length - len(ref_id))
+                    ref_id += [tokenizer.unk_token_id for _ in range(ref_length - len(ref_id))]
 
                 ref_ids += ref_id
             
@@ -146,7 +141,7 @@ def preprocess_dataset(
             model_inputs["labels"].append([IGNORE_INDEX] * len(source_ids) + target_ids)
 
         return model_inputs
-
+    
     def preprocess_unsupervised_dataset(examples: Dict[str, List[Any]]) -> Dict[str, Any]:
         # build inputs with format `<bos> X` and labels with format `Y <eos>`
         model_inputs = {"input_ids": [], "attention_mask": [], "labels": []}

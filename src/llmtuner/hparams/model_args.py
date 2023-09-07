@@ -71,6 +71,22 @@ class ModelArguments:
         default=None,
         metadata={"help": "Used in rope scaling. Do not specify this argument manually."}
     )
+    position_emb_type: Optional[str] = field(
+        default=None,
+        metadata={"help": "The type of position embedding type."}
+    )
+    ref_num: Optional[int] = field(
+        default=None,
+        metadata={"help": "The number of references"}
+    )
+    ref_length: Optional[int] = field(
+        default=None,
+        metadata={"help": "The length of each reference"}
+    )
+    instruction_length: Optional[int] = field(
+        default=None,
+        metadata={"help": "The length of instruction"}
+    )
 
     def __post_init__(self):
         if self.compute_dtype is not None or self.model_max_length is not None:

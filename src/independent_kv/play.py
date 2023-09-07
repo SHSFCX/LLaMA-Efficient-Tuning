@@ -1,5 +1,5 @@
 import torch
-from modeling_llama_unsupervised import LlamaIndependentKVUnsuperForCausalLM
+from independent_kv.modeling_llama_unsupervised_parallel_PE import LlamaIndependentKVUnsuperForCausalLM
 
 ckpt_dir = '/data/models/Llama-2-13b-hf'
 

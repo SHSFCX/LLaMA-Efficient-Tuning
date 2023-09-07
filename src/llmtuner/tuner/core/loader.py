@@ -78,6 +78,15 @@ def load_model_and_tokenizer(
 
     config = AutoConfig.from_pretrained(model_to_load, **config_kwargs)
 
+    if model_args.position_emb_type in ["parallel", "serial"]:
+        config.position_emb_type = model_args.position_emb_type
+    if model_args.ref_num is not None:
+        config.ref_num = model_args.ref_num
+    if model_args.ref_length is not None:
+        config.ref_length = model_args.ref_length
+    if model_args.instruction_length is not None:
+        config.instruction_length = model_args.instruction_length
+
     if hasattr(config, "fp16") and hasattr(config, "bf16"): # fix Qwen config
         if model_args.compute_dtype == torch.bfloat16:
             setattr(config, "bf16", True)
